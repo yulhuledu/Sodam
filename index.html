@@ -221,6 +221,7 @@
       <button class="btn ghost" style="margin:0; width:auto; flex:1 1 140px;" onclick="loadAdmin()">🔄 새로고침</button>
       <button class="btn" style="margin:0; width:auto; flex:1 1 140px; background:linear-gradient(120deg,#D96570,#b03a3a);" onclick="closeAllOrders()">🔒 주문 일괄 마감</button>
       <button class="btn" style="margin:0; width:auto; flex:1 1 140px; background:linear-gradient(120deg,#34a853,#137333);" onclick="reopenAllOrders()">🔓 주문 일괄 해제</button>
+      <span id="a-refreshing" style="display:none; font-size:12px; color:var(--muted); align-self:center;">⏳ 새로고침 중...</span>
     </div>
     <div id="a-delivery-card"></div>
     <div id="a-content"></div>
@@ -230,6 +231,7 @@
   <div class="tab-panel" id="panel-menu">
     <div class="card no-print">
       <button class="btn ghost" style="margin-bottom:16px;" onclick="loadMenuAdmin()">🔄 새로고침</button>
+      <span id="m-refreshing" style="display:none; font-size:12px; color:var(--muted); margin-left:8px;">⏳ 새로고침 중...</span>
       <label>➕ 새 메뉴 추가</label>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <input type="text" id="m-new-category" placeholder="분류 (예: 단품)" style="flex:1 1 120px;">
@@ -474,11 +476,16 @@ function renderSelectedSummary(){
 // 서버 호출 1번으로 한꺼번에 불러온다 (예전엔 3번 따로 호출해서 느렸던 부분을 개선)
 function refreshGlobalInfo(){
   const statusDiv = document.getElementById('t-status');
-  statusDiv.textContent = '확인 중...';
+  const isFirstLoad = !statusDiv.textContent.trim();
+  if(isFirstLoad) statusDiv.textContent = '확인 중...';
+  // 이미 보여주고 있는 내용이 있으면 지우지 않고 그대로 둔 채 조용히 새 데이터로만 교체한다
 
   callApi('getTeacherPageData', []).then(renderGlobalInfo).catch(err => {
-    statusDiv.className = 'status closed';
-    statusDiv.textContent = '정보를 불러오지 못했습니다: ' + err.message;
+    if(isFirstLoad){
+      statusDiv.className = 'status closed';
+      statusDiv.textContent = '정보를 불러오지 못했습니다: ' + err.message;
+    }
+    // 갱신 실패해도 이전 화면은 그대로 유지 (조용히 무시, 다음 자동 새로고침 때 다시 시도됨)
   });
 }
 
@@ -682,11 +689,34 @@ document.getElementById('t-submit').addEventListener('click', () => {
    ========================================================= */
 function loadAdmin(){
   unlockSpeech(); // 버튼을 누른 이 순간(동기)에 미리 스피치 엔진 잠금을 풀어둔다 (자동재생 차단 우회)
-  document.getElementById('a-delivery-card').innerHTML = '<div class="empty">불러오는 중...</div>';
-  document.getElementById('a-content').innerHTML = '<div class="empty">불러오는 중...</div>';
-  callApi('getAdminData', []).then(renderAdmin).catch(err => {
-    document.getElementById('a-content').innerHTML = '<div class="group"><div class="empty">불러오지 못했습니다: ' + err.message + '</div></div>';
+  const container = document.getElementById('a-content');
+  const isFirstLoad = !container.innerHTML.trim();
+  if(isFirstLoad){
+    // 맨 처음 열 때만 "불러오는 중" 표시 (보여줄 이전 데이터가 없으므로)
+    document.getElementById('a-delivery-card').innerHTML = '<div class="empty">불러오는 중...</div>';
+    container.innerHTML = '<div class="empty">불러오는 중...</div>';
+  } else {
+    // 이미 보이는 화면이 있으면 지우지 않고 그대로 둔 채, 조용히 최신 데이터로만 갱신한다
+    setRefreshingBadge('a-refreshing', true);
+  }
+  callApi('getAdminData', []).then(data => {
+    setRefreshingBadge('a-refreshing', false);
+    renderAdmin(data);
+  }).catch(err => {
+    setRefreshingBadge('a-refreshing', false);
+    if(isFirstLoad){
+      container.innerHTML = '<div class="group"><div class="empty">불러오지 못했습니다: ' + err.message + '</div></div>';
+    } else {
+      alert('새로고침 중 오류: ' + err.message + ' (화면은 이전 내용이 유지됩니다)');
+    }
   });
+}
+
+// 탭 제목 옆에 "새로고침 중..." 같은 작은 표시를 붙였다 뗐다 하는 헬퍼
+function setRefreshingBadge(id, on){
+  let el = document.getElementById(id);
+  if(!el) return;
+  el.style.display = on ? 'inline' : 'none';
 }
 
 let AUDIO_CTX = null;
@@ -868,9 +898,23 @@ function reopenAllOrders(){
    메뉴 관리 탭
    ========================================================= */
 function loadMenuAdmin(){
-  document.getElementById('m-content').innerHTML = '<div class="empty">불러오는 중...</div>';
-  callApi('getMenuList', []).then(renderMenuAdmin).catch(err => {
-    document.getElementById('m-content').innerHTML = '<div class="group"><div class="empty">불러오지 못했습니다: ' + err.message + '</div></div>';
+  const container = document.getElementById('m-content');
+  const isFirstLoad = !container.innerHTML.trim();
+  if(isFirstLoad){
+    container.innerHTML = '<div class="empty">불러오는 중...</div>';
+  } else {
+    setRefreshingBadge('m-refreshing', true);
+  }
+  callApi('getMenuList', []).then(list => {
+    setRefreshingBadge('m-refreshing', false);
+    renderMenuAdmin(list);
+  }).catch(err => {
+    setRefreshingBadge('m-refreshing', false);
+    if(isFirstLoad){
+      container.innerHTML = '<div class="group"><div class="empty">불러오지 못했습니다: ' + err.message + '</div></div>';
+    } else {
+      alert('새로고침 중 오류: ' + err.message + ' (화면은 이전 내용이 유지됩니다)');
+    }
   });
 }
 
