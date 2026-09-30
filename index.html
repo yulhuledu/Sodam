@@ -580,16 +580,19 @@ function renderAllOrdersForTeacher(data){
       <div style="margin-bottom:14px;">
         <div style="font-size:15px;font-weight:700;margin-bottom:6px;">${office} <span style="font-weight:400;font-size:13px;color:var(--muted)">· ${peopleCount}명 · ${fmt(total)}</span></div>
         <div style="font-size:14px;color:var(--muted);line-height:2.1;">
-          ${items.map(i => {
+          ${groupOrderItems(items).map(i => {
             const mark = i.confirmed ? '✅' : '⏳';
             const memoHtml = i.memo ? ` <span style="color:#b06000;">📝 ${i.memo}</span>` : '';
             const nameEsc = (i.name || '').replace(/'/g, "\\'");
+            const firstRow = i.rows[0]; // 메뉴변경/취소는 묶음 중 1건만 대상으로 함 (나머지는 그대로 남음)
+            const qtyLabel = i.qty > 1 ? ` <b>×${i.qty}</b>` : '';
+            const cancelLabel = i.qty > 1 ? '1개 취소' : '취소';
             const controls = i.confirmed ? '' : `
               <span class="no-print">
-                <button onclick="startChangeOrder(${i.row}, '${nameEsc}')" style="border:none;background:none;color:#4285F4;cursor:pointer;font-size:12px;text-decoration:underline;padding:0 2px;">메뉴변경</button>
-                <button onclick="cancelMyOrder(${i.row}, '${nameEsc}')" style="border:none;background:none;color:#a50e0e;cursor:pointer;font-size:12px;text-decoration:underline;padding:0 2px;">취소</button>
+                <button onclick="startChangeOrder(${firstRow}, '${nameEsc}')" style="border:none;background:none;color:#4285F4;cursor:pointer;font-size:12px;text-decoration:underline;padding:0 2px;">메뉴변경</button>
+                <button onclick="cancelMyOrder(${firstRow}, '${nameEsc}')" style="border:none;background:none;color:#a50e0e;cursor:pointer;font-size:12px;text-decoration:underline;padding:0 2px;">${cancelLabel}</button>
               </span>`;
-            return `<div id="order-line-${i.row}">${mark} ${i.name} - <span id="order-menu-${i.row}">${i.menu} (${fmt(i.price)})</span>${memoHtml}${controls}</div>`;
+            return `<div id="order-line-${firstRow}">${mark} ${i.name}${qtyLabel} - <span id="order-menu-${firstRow}">${fmt(i.price * i.qty)}${i.qty > 1 ? ` (개당 ${fmt(i.price)})` : ''}</span>${memoHtml}${controls}</div>`;
           }).join('')}
         </div>
       </div>`;
@@ -771,6 +774,27 @@ function speakOrderAlert(){
   } catch(e){ /* 음성 지원 안 되는 환경이면 조용히 무시 */ }
 }
 
+// 같은 사람이 같은 메뉴를 여러 개 시켰을 때(이름·메뉴·가격·확인상태·메모가 모두 같은 건),
+// 화면에서 중복으로 보이지 않도록 하나로 묶어서 수량(qty)과 해당 건들의 row 번호 목록(rows)을 붙여준다.
+// 확인상태나 메모가 서로 다르면(예: 하나만 확인 체크됨) 다른 건으로 취급해 묶지 않는다.
+function groupOrderItems(items){
+  const order = [];
+  const map = new Map();
+  items.forEach(i => {
+    const key = [i.name, i.price, i.confirmed ? 1 : 0, i.memo || '', i.session || (i.name + i.time)].join('|');
+    if(map.has(key)){
+      const g = map.get(key);
+      g.qty += 1;
+      g.rows.push(i.row);
+    } else {
+      const g = { ...i, qty: 1, rows: [i.row] };
+      map.set(key, g);
+      order.push(g);
+    }
+  });
+  return order;
+}
+
 function renderAdmin(data){
   const container = document.getElementById('a-content');
   const deliveryBox = document.getElementById('a-delivery-card');
@@ -837,24 +861,30 @@ function renderAdmin(data){
       </div>
       <table>
         <tr><th>확인</th><th>시간</th><th>이름</th><th>메뉴</th><th>가격</th><th>메모</th></tr>
-        ${items.map(i => `<tr>
-          <td class="no-print"><input type="checkbox" ${i.confirmed ? 'checked' : ''} onchange="toggleOrder(${i.row}, this.checked)"></td>
+        ${groupOrderItems(items).map(i => {
+          const rowsAttr = i.rows.join(',');
+          const groupId = i.rows[0]; // 그룹을 식별할 대표 row (메모 입력칸 id 등에 사용)
+          return `<tr>
+          <td class="no-print"><input type="checkbox" ${i.confirmed ? 'checked' : ''} onchange="toggleOrderGroup([${rowsAttr}], this.checked, ${groupId})"></td>
           <td class="print-only" style="display:none">${i.confirmed ? '✅' : ''}</td>
-          <td>${i.time}</td><td>${i.name}</td><td>${i.menu}</td><td>${fmt(i.price)}</td>
+          <td>${i.time}</td><td>${i.name}</td>
+          <td>${i.menu}${i.qty > 1 ? ` <b>×${i.qty}</b>` : ''}</td>
+          <td>${fmt(i.price * i.qty)}${i.qty > 1 ? `<br><span style="font-size:11px;color:var(--muted);">(개당 ${fmt(i.price)})</span>` : ''}</td>
           <td>
             <select class="no-print" style="margin:0 0 4px 0;padding:7px 9px;font-size:12px;width:100%;"
-              onchange="if(this.value){ document.getElementById('memo-${i.row}').value = this.value; setMemo(${i.row}, this.value); } this.selectedIndex=0;">
+              onchange="if(this.value){ document.getElementById('memo-${groupId}').value = this.value; setMemoGroup([${rowsAttr}], this.value); } this.selectedIndex=0;">
               <option value="">⚡ 빠른 선택</option>
               <option value="품절, 다른 메뉴 변경 요청">품절, 다른 메뉴 변경 요청</option>
               <option value="확인 완료, 정상 준비 중">확인 완료, 정상 준비 중</option>
             </select>
-            <input type="text" id="memo-${i.row}" class="no-print" style="margin:0;padding:7px 9px;font-size:13px;"
+            <input type="text" id="memo-${groupId}" class="no-print" style="margin:0;padding:7px 9px;font-size:13px;"
               placeholder="예: 재고없음"
               value="${(i.memo || '').replace(/"/g, '&quot;')}"
-              onchange="setMemo(${i.row}, this.value)">
+              onchange="setMemoGroup([${rowsAttr}], this.value)">
             <span class="print-only" style="display:none">${i.memo || ''}</span>
           </td>
-        </tr>`).join('')}
+        </tr>`;
+        }).join('')}
       </table>
     </div>`;
   }).join('');
@@ -864,18 +894,19 @@ function renderAdmin(data){
 
 // 체크박스를 켜면 자동으로 "확인 완료, 정상 준비 중" 메모를 채워준다.
 // 체크를 끄는 경우에는 메모를 자동으로 바꾸지 않고, 사장님이 빠른 선택에서 "품절..." 등을 직접 고르도록 둔다.
-function toggleOrder(row, checked){
-  callApi('setOrderConfirmed', [row, checked], 'POST').catch(err => alert(err.message));
+// rows: 화면에 하나로 묶여 보이는 동일 메뉴 여러 건의 row 번호 배열 (수량이 1개면 원소 1개짜리 배열)
+function toggleOrderGroup(rows, checked, groupId){
+  callApi('setOrderConfirmedBulk', [rows, checked], 'POST').catch(err => alert(err.message));
   if(checked){
     const text = '확인 완료, 정상 준비 중';
-    const input = document.getElementById('memo-' + row);
+    const input = document.getElementById('memo-' + groupId);
     if(input) input.value = text;
-    callApi('setOrderMemo', [row, text], 'POST').catch(err => alert(err.message));
+    callApi('setOrderMemoBulk', [rows, text], 'POST').catch(err => alert(err.message));
   }
 }
 
-function setMemo(row, memo){
-  callApi('setOrderMemo', [row, memo], 'POST').catch(err => alert(err.message));
+function setMemoGroup(rows, memo){
+  callApi('setOrderMemoBulk', [rows, memo], 'POST').catch(err => alert(err.message));
 }
 
 // 오늘 전체 주문을 한 번에 마감 처리 (모든 주문 확인 체크 + 이후 주문 차단)
