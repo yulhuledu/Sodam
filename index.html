@@ -333,7 +333,12 @@ let PER_PERSON_CAP = 9000;
 let MENU_LIST = [];
 let ORDERING_OPEN = true;
 
-callApi('getInitData', []).then(initTeacher).catch(err => alert('초기 데이터를 불러오지 못했습니다: ' + err.message));
+// 최초 로딩 시 getInitData(메뉴/교무실 등 고정정보) + getTeacherPageData(오늘 상태)를
+// 서버 호출 1번으로 한꺼번에 받아온다 (예전엔 2번 따로 호출해서 첫 로딩이 느렸던 부분을 개선)
+callApi('getInitPageData', []).then(data => {
+  initTeacher(data.init);
+  renderGlobalInfo(data.page);
+}).catch(err => alert('초기 데이터를 불러오지 못했습니다: ' + err.message));
 
 function initTeacher(data){
   DELIVERY_FEE = Number(data.deliveryFee);
@@ -385,7 +390,6 @@ function initTeacher(data){
   });
 
   officeSel.addEventListener('change', checkPhoneNeeded);
-  refreshGlobalInfo();
 }
 
 // 교무실을 바꿀 때마다: 오늘 그 교무실에 이미 등록된 대표 연락처가 있는지 확인해서,
@@ -472,7 +476,16 @@ function refreshGlobalInfo(){
   const statusDiv = document.getElementById('t-status');
   statusDiv.textContent = '확인 중...';
 
-  callApi('getTeacherPageData', []).then(data => {
+  callApi('getTeacherPageData', []).then(renderGlobalInfo).catch(err => {
+    statusDiv.className = 'status closed';
+    statusDiv.textContent = '정보를 불러오지 못했습니다: ' + err.message;
+  });
+}
+
+// getTeacherPageData()가 반환한 데이터로 화면을 그린다.
+// (최초 로딩 시에는 getInitPageData()로 한 번에 받아온 데이터를 바로 여기 넘겨서 왕복을 줄인다)
+function renderGlobalInfo(data){
+    const statusDiv = document.getElementById('t-status');
     const s = data.dayStatus;
     ORDERING_OPEN = !!s.open;
 
@@ -524,10 +537,6 @@ function refreshGlobalInfo(){
     renderAllOrdersForTeacher(data.adminData);
     applySoldOutFromList(data.soldOutMenus);
     updateTeacherButton();
-  }).catch(err => {
-    statusDiv.className = 'status closed';
-    statusDiv.textContent = '정보를 불러오지 못했습니다: ' + err.message;
-  });
 }
 
 // 오늘 전체 주문 내역을 교무실별로 일괄 표시 (선생님 화면에서는 읽기 전용, 체크/메모 수정 불가)
